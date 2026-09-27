@@ -4,7 +4,7 @@ import os
 from dotenv import load_dotenv
 from supabase import create_client
 
-from routers import resources
+from routers import resources, auth
 
 load_dotenv()
 SUPABASE_URL = os.getenv("SUPABASE_URL")
@@ -15,6 +15,7 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 app = FastAPI()
 
 app.include_router(resources.router)
+app.include_router(auth.router)
 
 @app.get("/")
 def home():
