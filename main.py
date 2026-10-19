@@ -3,6 +3,8 @@ from fastapi import FastAPI
 # frontend가 backend로 요청을 보낼 수 있게 허용해주는 FastAPI 기능
 from fastapi.middleware.cors import CORSMiddleware
 
+
+
 import os
 from dotenv import load_dotenv
 from supabase import create_client
@@ -20,8 +22,10 @@ app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:3000",
+        "http://127.0.0.1:5500",
+        "http://localhost:5500",
         "http://127.0.0.1:3000",
+        "http://localhost:3000",
     ],
     allow_credentials=True,
     allow_methods=["*"],
