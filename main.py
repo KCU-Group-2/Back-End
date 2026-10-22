@@ -1,4 +1,5 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
 
 # frontend가 backend로 요청을 보낼 수 있게 허용해주는 FastAPI 기능
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,6 +20,13 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # frontend에서 오는 요청을 허용할지 말지 검사하는 기능을 app에 추가
 app = FastAPI()
+
+class CourseCreate(BaseModel):
+    subject: str
+    course_number: str
+    title: str
+    description: str = ""
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -40,6 +48,46 @@ app.include_router(auth.router)
 @app.get("/")
 def home():
     return {"message": "StudySwap API is running"}
+
+@app.post("/courses")
+def create_course(course: CourseCreate):
+    subject = course.subject.strip().upper()
+    course_number = course.course_number.strip()
+    title = course.title.strip()
+    description = course.description.strip()
+
+    if not subject or not course_number or not title:
+        raise HTTPException(
+            status_code=400,
+            detail="Subject, course number, and title are required."
+        )
+
+    existing = (
+        supabase.table("courses")
+        .select("id")
+        .eq("subject", subject)
+        .eq("course_number", course_number)
+        .execute()
+    )
+
+    if existing.data:
+        raise HTTPException(
+            status_code=409,
+            detail="This course already exists."
+        )
+
+    response = (
+        supabase.table("courses")
+        .insert({
+            "subject": subject,
+            "course_number": course_number,
+            "title": title,
+            "description": description
+        })
+        .execute()
+    )
+
+    return response.data
 
 @app.get("/courses")
 def get_courses():
