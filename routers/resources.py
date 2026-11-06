@@ -1,6 +1,8 @@
 from fastapi import APIRouter
 from pydantic import BaseModel
 
+from openai import OpenAI
+
 import os
 from dotenv import load_dotenv
 from supabase import create_client
@@ -10,6 +12,7 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 router = APIRouter()
 
@@ -20,6 +23,9 @@ class Resource(BaseModel):
     resource_type: str
     description: str
     course_id: int
+
+class ChatRequest(BaseModel):
+    question: str
 
 
 @router.post("/resources")
@@ -83,3 +89,50 @@ def delete_resource(resource_id: int):
     )
 
     return response.data
+
+
+@router.post("/resources/{resource_id}/ask")
+def ask_resource(resource_id: int, request: ChatRequest):
+
+    response = (
+        supabase.table("resources")
+        .select("*")
+        .eq("id", resource_id)
+        .execute()
+    )
+
+    if not response.data:
+        return {
+            "answer": "자료를 찾을 수 없습니다."
+        }
+
+    resource = response.data[0]
+
+    title = resource.get("title", "")
+    description = resource.get("description", "")
+
+    prompt = f"""
+You are a study assistant for university students.
+
+Answer the student's question using ONLY the study resource information provided below.
+
+If the information is not contained in the resource, clearly say that the current resource does not provide enough information to answer the question.
+
+Resource title:
+{title}
+
+Resource content:
+{description}
+
+Student question:
+{request.question}
+"""
+
+    ai_response = client.responses.create(
+        model="gpt-6-luna",
+        input=prompt
+    )
+
+    return {
+        "answer": ai_response.output_text
+    }
