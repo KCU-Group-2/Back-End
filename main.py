@@ -1,6 +1,5 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-
 from fastapi.middleware.cors import CORSMiddleware
 
 import os
@@ -76,20 +75,14 @@ def create_course(course: CourseCreate):
     if not subject or not course_number or not title:
         raise HTTPException(
             status_code=400,
-            detail=(
-                "Subject, course number, "
-                "and title are required."
-            )
+            detail="Subject, course number, and title are required."
         )
 
     existing = (
         supabase.table("courses")
         .select("id")
         .eq("subject", subject)
-        .eq(
-            "course_number",
-            course_number
-        )
+        .eq("course_number", course_number)
         .execute()
     )
 
@@ -150,8 +143,6 @@ def get_course_resources(course_id: int):
         .execute()
     )
 
-    # uploader_id와 pdf_path가 frontend에
-    # 직접 노출되지 않도록 변환
     return [
         resources.public_resource(row)
         for row in response.data
