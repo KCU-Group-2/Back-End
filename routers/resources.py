@@ -20,6 +20,9 @@ from dotenv import load_dotenv
 from database import get_supabase_admin
 from routers.auth import get_current_user
 
+from io import BytesIO
+from pypdf import PdfReader
+
 
 load_dotenv()
 
@@ -571,10 +574,7 @@ def ask_resource(
     if client is None:
         raise HTTPException(
             status_code=500,
-            detail=(
-                "OpenAI configuration "
-                "is missing."
-            )
+            detail="OpenAI configuration is missing."
         )
 
     admin = get_supabase_admin()
@@ -582,43 +582,72 @@ def ask_resource(
     response = (
         admin.table("resources")
         .select("*")
-        .eq(
-            "id",
-            resource_id
-        )
+        .eq("id", resource_id)
         .execute()
     )
 
     if not response.data:
         return {
-            "answer":
-                "자료를 찾을 수 없습니다."
+            "answer": "자료를 찾을 수 없습니다."
         }
 
     resource = response.data[0]
 
-    title = resource.get(
-        "title",
-        ""
-    )
+    title = resource.get("title", "")
+    pdf_path = resource.get("pdf_path")
 
-    description = resource.get(
-        "description",
-        ""
-    )
+    if not pdf_path:
+        return {
+            "answer": "이 자료에는 PDF 파일이 없습니다."
+        }
+
+    try:
+        # Supabase Storage에서 PDF 다운로드
+        pdf_bytes = (
+            admin.storage
+            .from_(PDF_BUCKET)
+            .download(pdf_path)
+        )
+
+        # PDF 텍스트 추출
+        reader = PdfReader(
+            BytesIO(pdf_bytes)
+        )
+
+        pdf_text = ""
+
+        for page in reader.pages:
+            text = page.extract_text()
+
+            if text:
+                pdf_text += text + "\n"
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Unable to read PDF: {str(e)}"
+        )
+
+    if not pdf_text.strip():
+        return {
+            "answer":
+                "이 PDF에서 읽을 수 있는 텍스트를 찾지 못했습니다."
+        }
 
     prompt = f"""
 You are a study assistant for university students.
 
-Answer the student's question using ONLY the study resource information provided below.
+Answer the student's question using ONLY the PDF study resource provided below.
 
-If the information is not contained in the resource, clearly say that the current resource does not provide enough information to answer the question.
+Do not use outside knowledge.
+
+If the answer cannot be found in the PDF, clearly say that the current resource does not contain enough information to answer the question.
 
 Resource title:
 {title}
 
-Resource content:
-{description}
+PDF content:
+{pdf_text}
 
 Student question:
 {request.question}
