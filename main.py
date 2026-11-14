@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -10,9 +10,9 @@ from supabase import create_client
 from routers import (
     auth,
     resource_requests,
-    resources
+    resources,
+    user_features
 )
-
 
 load_dotenv()
 
@@ -56,7 +56,7 @@ app.add_middleware(
 app.include_router(resources.router)
 app.include_router(auth.router)
 app.include_router(resource_requests.router)
-
+app.include_router(user_features.router)
 
 @app.get("/")
 def home():
@@ -135,7 +135,12 @@ def search_courses(q: str):
 
 
 @app.get("/courses/{course_id}/resources")
-def get_course_resources(course_id: int):
+def get_course_resources(
+    course_id: int,
+    current_user=Depends(
+        auth.get_current_user
+    )
+):
     response = (
         supabase.table("resources")
         .select("*")
@@ -143,7 +148,17 @@ def get_course_resources(course_id: int):
         .execute()
     )
 
-    return [
-        resources.public_resource(row)
+    items = [
+        resources.public_resource(
+            row,
+            current_user
+        )
         for row in response.data
     ]
+
+    items.sort(
+        key=lambda item:
+            not item["unlocked"]
+    )
+
+    return items
