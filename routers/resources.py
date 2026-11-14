@@ -7,6 +7,8 @@ from fastapi import (
     UploadFile
 )
 
+from fastapi.responses import StreamingResponse
+
 from pydantic import BaseModel
 from openai import OpenAI
 
@@ -21,7 +23,7 @@ from database import get_supabase_admin
 from routers.auth import get_current_user
 
 from io import BytesIO
-from pypdf import PdfReader
+from pypdf import PdfReader, PdfWriter
 
 
 load_dotenv()
@@ -57,15 +59,100 @@ class ChatRequest(BaseModel):
 
 # 일반 사용자에게 보여줄 Resource 정보
 # 실제 uploader_id와 pdf_path는 숨긴다.
-def public_resource(resource):
+def resource_is_owner(
+    resource,
+    current_user
+):
+    if current_user is None:
+        return False
+
+    return (
+        str(resource.get("uploader_id"))
+        == str(current_user.id)
+    )
+
+
+def resource_is_unlocked(
+    resource,
+    current_user
+):
+    if current_user is None:
+        return False
+
+    # 자신의 자료는 포인트를 내지 않고 항상 접근 가능
+    if resource_is_owner(
+        resource,
+        current_user
+    ):
+        return True
+
+    admin = get_supabase_admin()
+
+    response = (
+        admin.table("resource_unlocks")
+        .select("resource_id")
+        .eq(
+            "user_id",
+            str(current_user.id)
+        )
+        .eq(
+            "resource_id",
+            resource.get("id")
+        )
+        .limit(1)
+        .execute()
+    )
+
+    return bool(response.data)
+
+
+def can_view_full_resource(
+    resource,
+    current_user
+):
+    return resource_is_unlocked(
+        resource,
+        current_user
+    )
+
+
+# 일반 사용자에게 보여줄 Resource 정보
+# uploader_id와 pdf_path는 frontend에 노출하지 않는다.
+def public_resource(
+    resource,
+    current_user=None
+):
+    is_owner = resource_is_owner(
+        resource,
+        current_user
+    )
+
+    unlocked = resource_is_unlocked(
+        resource,
+        current_user
+    )
+
+    unlock_cost = (
+        resource.get("unlock_cost")
+        or 10
+    )
+
     return {
         "id": resource.get("id"),
         "title": resource.get("title"),
         "course": resource.get("course"),
-        "resource_type": resource.get("resource_type"),
-        "description": resource.get("description"),
-        "course_id": resource.get("course_id"),
-        "created_at": resource.get("created_at"),
+        "resource_type": resource.get(
+            "resource_type"
+        ),
+        "description": resource.get(
+            "description"
+        ),
+        "course_id": resource.get(
+            "course_id"
+        ),
+        "created_at": resource.get(
+            "created_at"
+        ),
 
         "uploader": "Anonymous",
 
@@ -75,7 +162,17 @@ def public_resource(resource):
 
         "pdf_filename": resource.get(
             "pdf_filename"
-        )
+        ),
+
+        "unlock_cost": unlock_cost,
+
+        "is_owner": is_owner,
+
+        "unlocked": unlocked,
+
+        "locked": not unlocked,
+
+        "can_view_full_pdf": unlocked
     }
 
 
@@ -152,7 +249,10 @@ def create_resource(
     )
 
     return [
-        public_resource(row)
+        public_resource(
+            row,
+            current_user
+        )
         for row in response.data
     ]
 
@@ -290,7 +390,10 @@ async def create_resource_with_pdf(
             )
 
         return [
-            public_resource(row)
+            public_resource(
+                row,
+                current_user
+            )
             for row in response.data
         ]
 
@@ -345,7 +448,10 @@ def get_resources(
     )
 
     return [
-        public_resource(row)
+        public_resource(
+            row,
+            current_user
+        )
         for row in response.data
     ]
 
@@ -364,7 +470,10 @@ def get_resource(
     )
 
     return [
-        public_resource(resource)
+        public_resource(
+            resource,
+            current_user
+        )
     ]
 
 
@@ -417,7 +526,10 @@ def update_resource(
     )
 
     return [
-        public_resource(row)
+        public_resource(
+            row,
+            current_user
+        )
         for row in response.data
     ]
 
@@ -473,6 +585,96 @@ def delete_resource(
         "success": True
     }
 
+# Locked 상태에서도 볼 수 있는 PDF Preview
+# 처음 2페이지만 반환한다.
+@router.get(
+    "/resources/{resource_id}/preview"
+)
+def get_resource_preview(
+    resource_id: int,
+    current_user=Depends(
+        get_current_user
+    )
+):
+    admin = get_supabase_admin()
+
+    resource = get_resource_row(
+        resource_id
+    )
+
+    pdf_path = resource.get(
+        "pdf_path"
+    )
+
+    if not pdf_path:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "This resource does "
+                "not have a PDF."
+            )
+        )
+
+    try:
+        pdf_bytes = (
+            admin.storage
+            .from_(PDF_BUCKET)
+            .download(pdf_path)
+        )
+
+        reader = PdfReader(
+            BytesIO(pdf_bytes)
+        )
+
+        if len(reader.pages) == 0:
+            raise HTTPException(
+                status_code=422,
+                detail="PDF has no pages."
+            )
+
+        writer = PdfWriter()
+
+        preview_page_count = min(
+            2,
+            len(reader.pages)
+        )
+
+        for index in range(
+            preview_page_count
+        ):
+            writer.add_page(
+                reader.pages[index]
+            )
+
+        preview_buffer = BytesIO()
+
+        writer.write(
+            preview_buffer
+        )
+
+        preview_buffer.seek(0)
+
+        return StreamingResponse(
+            preview_buffer,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition":
+                    'inline; filename="preview.pdf"'
+            }
+        )
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Unable to create PDF "
+                f"preview: {str(e)}"
+            )
+        )
+
 
 # PDF 열기용 signed URL
 @router.get(
@@ -489,6 +691,18 @@ def get_resource_pdf(
     resource = get_resource_row(
         resource_id
     )
+
+    if not can_view_full_resource(
+        resource,
+        current_user
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Unlock this resource "
+                "before viewing the full PDF."
+            )
+        )
 
     pdf_path = resource.get(
         "pdf_path"
@@ -592,6 +806,18 @@ def ask_resource(
         }
 
     resource = response.data[0]
+
+    if not can_view_full_resource(
+        resource,
+        current_user
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Unlock this resource "
+                "before using the PDF chatbot."
+            )
+        )
 
     title = resource.get("title", "")
     pdf_path = resource.get("pdf_path")

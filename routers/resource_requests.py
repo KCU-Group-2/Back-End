@@ -127,6 +127,28 @@ def fulfill_request(
 
     request_row = request_response.data[0]
 
+    if request_row.get("status") == "fulfilled":
+
+        if (
+            request_row.get(
+                "fulfilled_resource_id"
+            )
+            == body.resource_id
+        ):
+            return [
+                public_request(
+                    request_row
+                )
+            ]
+
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This request has already "
+                "been fulfilled."
+            )
+        )
+
     resource_response = (
         admin.table("resources")
         .select(
