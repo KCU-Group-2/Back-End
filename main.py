@@ -13,6 +13,7 @@ from routers import (
     resources,
     user_features
 )
+from routers import reports
 
 load_dotenv()
 
@@ -57,6 +58,7 @@ app.include_router(resources.router)
 app.include_router(auth.router)
 app.include_router(resource_requests.router)
 app.include_router(user_features.router)
+app.include_router(reports.router)
 
 @app.get("/")
 def home():
