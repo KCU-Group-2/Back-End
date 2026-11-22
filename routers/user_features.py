@@ -55,6 +55,33 @@ def unlock_resource(
 ):
     admin = get_supabase_admin()
 
+    resource = resources.get_resource_row(
+        resource_id
+    )
+
+    if not resource:
+        raise HTTPException(
+            status_code=404,
+            detail="Resource not found."
+        )
+
+    moderation_status = resource.get(
+        "moderation_status",
+        "active"
+    )
+
+    if moderation_status == "review":
+        raise HTTPException(
+            status_code=403,
+            detail="This resource is under review and cannot be unlocked."
+        )
+
+    if moderation_status == "removed":
+        raise HTTPException(
+            status_code=404,
+            detail="Resource not found."
+        )
+
     response = (
         admin.rpc(
             "unlock_resource",
@@ -99,9 +126,6 @@ def unlock_resource(
             )
         )
 
-    resource = resources.get_resource_row(
-        resource_id
-    )
 
     return {
         "success": True,

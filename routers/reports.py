@@ -39,6 +39,24 @@ def report_resource(
 ):
     admin = get_supabase_admin()
 
+    reporter_profile = (
+        admin.table("profiles")
+        .select("reporting_restricted")
+        .eq("user_id", str(current_user.id))
+        .execute()
+    )
+
+    if (
+        reporter_profile.data
+        and reporter_profile.data[0].get(
+            "reporting_restricted"
+        )
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Your reporting access has been restricted."
+        )
+
     resource_response = (
         admin.table("resources")
         .select("*")
@@ -198,6 +216,40 @@ def approve_report(
 
     uploader_id = resource.get("uploader_id")
 
+    if uploader_id:
+        uploader_profile = (
+            admin.table("profiles")
+            .select("violation_count")
+            .eq("user_id", uploader_id)
+            .execute()
+        )
+
+        if uploader_profile.data:
+            new_violation_count = (
+                uploader_profile.data[0].get(
+                    "violation_count",
+                    0
+                )
+                + 1
+            )
+
+            profile_update = {
+                "violation_count":
+                    new_violation_count
+            }
+
+            if new_violation_count >= 3:
+                profile_update[
+                    "upload_restricted"
+                ] = True
+
+            (
+                admin.table("profiles")
+                .update(profile_update)
+                .eq("user_id", uploader_id)
+                .execute()
+            )
+
     # -----------------------------------------------------
     # Refund everyone who unlocked this resource
     # -----------------------------------------------------
@@ -352,6 +404,52 @@ def reject_report(
 
     if not resource_response.data:
         raise HTTPException(status_code=404, detail="Resource not found.")
+
+    pending_reports = (
+        admin.table("resource_reports")
+        .select("reporter_id")
+        .eq("resource_id", resource_id)
+        .eq("status", "pending")
+        .execute()
+    )
+
+    reporter_ids = {
+        row["reporter_id"]
+        for row in pending_reports.data
+    }
+
+    for reporter_id in reporter_ids:
+        profile_response = (
+            admin.table("profiles")
+            .select("false_report_count")
+            .eq("user_id", reporter_id)
+            .execute()
+        )
+
+        if not profile_response.data:
+            continue
+
+        new_false_count = (
+            profile_response.data[0].get(
+                "false_report_count",
+                0
+            )
+            + 1
+        )
+
+        profile_update = {
+            "false_report_count": new_false_count
+        }
+
+        if new_false_count >= 3:
+            profile_update["reporting_restricted"] = True
+
+        (
+            admin.table("profiles")
+            .update(profile_update)
+            .eq("user_id", reporter_id)
+            .execute()
+        )
 
     (
         admin.table("resource_reports")

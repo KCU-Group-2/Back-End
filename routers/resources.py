@@ -311,6 +311,27 @@ async def create_resource_with_pdf(
 
     admin = get_supabase_admin()
 
+    profile_response = (
+        admin.table("profiles")
+        .select("upload_restricted")
+        .eq("user_id", str(current_user.id))
+        .execute()
+    )
+
+    if (
+        profile_response.data
+        and profile_response.data[0].get(
+            "upload_restricted"
+        )
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Your account is currently "
+                "restricted from uploading resources."
+            )
+        )
+
     storage_path = (
         f"{current_user.id}/"
         f"{uuid4()}.pdf"
