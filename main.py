@@ -47,6 +47,7 @@ app.add_middleware(
         "http://localhost:3000",
         "http://127.0.0.1:5501",
         "http://localhost:5501",
+        "https://studyswap-frontend.onrender.com",
     ],
     allow_credentials=True,
     allow_methods=["*"],
